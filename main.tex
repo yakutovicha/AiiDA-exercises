@@ -1,0 +1,644 @@
+\documentclass[twoside,a4paper,11pt]{extarticle}
+\usepackage[utf8]{inputenc}
+
+
+% Version for real-life tutorial (online = false)
+\usepackage{etoolbox}
+\newtoggle{online}
+\togglefalse{online}
+
+\input{custom_specifications.tex}
+\input{preamble.tex}
+
+\title{AiiDA Screening Study}
+%\author{}
+\date{May 14th, 2018 -- Version 1.1}
+
+\begin{document}
+
+\maketitle
+
+% Dropbox link to pdf: https://www.dropbox.com/s/gagbp557s6wxiiw/AiiDA_exercises.pdf?dl=1
+% bit.ly shortlink http://bit.ly/aiida-molsim-exercise
+
+\textbf{Task:} Screen a set of metal-organic frameworks (MOFs) for their performance in storing methane at room temperature
+by computing their \textit{deliverable capacities}, i.e. the difference between the amount of methane stored in a fully loaded tank (at 65 bar) and an empty tank (at 5.8 bar) per volume. 
+
+\textbf{Report:} Write a short report (1 page)
+outlining your approach and identifying the five MOFs with the highest deliverable capacities.
+Include an export of your AiiDA database\footnote{Upload to a file hosting service
+like \href{https://drive.switch.ch/}{SWITCHdrive} or \href{https://www.dropbox.com/}{Dropbox} and include a download link in the report.}.
+Hand in to leopold.talirz@epfl.ch by May 21st, 2018.
+
+\textbf{Note:} This exercise requires a basic knowledge of python.
+If you are not familiar with python, partner with someone who is.
+
+\section{Import the structures}
+You can download a tar file containing the structures from
+\begin{bashcommand}
+> wget https://www.dropbox.com/s/hg2uktah6pzi8sq/struct.tar.gz?dl=0 -O struct.tar.gz
+> tar -xf struct.tar.gz
+\end{bashcommand}
+
+\begin{itemize}
+    \item Visualize a few structures using \verb|jmol|:
+\begin{bashcommand}
+> cd struct/
+> jmol <structure>.cif
+\end{bashcommand}
+    Can you think of two criteria for a high deliverable
+    methane capacity?
+    
+    \item Use the \verb|CifData| class to import the structures into your database, e.g.
+    
+    
+\begin{pythoncommand}
+CifData = DataFactory('cif')
+cif = CifData(file='/path/to/file.cif')
+cif.store()
+\end{pythoncommand}
+
+    \item Use wildcards with the \verb|glob| and \verb|os| modules to get the file paths of all structures like so:
+\begin{pythoncommand}
+from glob import glob
+from os import path
+all_structure_files = glob(path.abspath("/path/to/struct/*"))
+\end{pythoncommand}
+
+\item Keep track of your structures using groups
+\begin{pythoncommand}
+# Use get_or_create to be able to run this multiple times
+mofs, created = Group.get_or_create(name='mofs')
+mofs.add_nodes([cif1, cif2])
+\end{pythoncommand}
+
+\item Finally, you can load your structures from the group using the \href{http://aiida-core.readthedocs.io/en/latest/querying/querybuilder/usage.html}{AiiDA query builder}
+\begin{pythoncommand}
+qb = QueryBuilder()
+qb.append(Group, filters = {'name':'mofs'})
+mofs = qb.one()[0]
+
+for cif in mofs.nodes:
+  print cif
+\end{pythoncommand}
+\end{itemize}
+
+%\pagebreak
+\section{Perform geometric analysis of one MOF}
+Use the \href{http://www.zeoplusplus.org/}{zeo++} code to
+analyze the structure, such as the volume inside the MOF
+that is accessible to methane.
+
+\begin{itemize}
+    \item To make things simple, start with one MOF: \verb|DSoLANSUKYIH.cif|
+    \item Set up the  \href{https://scitas.epfl.ch/hardware/deneb-and-eltanin}{Deneb} computer at EPFL
+    \begin{itemize}
+        \item Import the \verb|deneb-molsim| computer and its codes into AiiDA
+        
+\begin{bashcommand}
+> verdi import https://www.dropbox.com/s/wb2z22ich0ajbdl/setup.aiida?dl=1
+> verdi computer list -a  # should show 'deneb-molsim'
+> verdi code list -A   # should show 'zeopp@deneb-molsim' and 'raspa@deneb-molsim'
+\end{bashcommand}
+    
+        \item Generate an SSH key pair for passwordless connection
+\begin{bashcommand}
+> ssh-keygen
+
+Generating public/private rsa key pair.
+Enter file in which to save the key (/home/max/.ssh/id_rsa): <Enter>
+Enter passphrase (empty for no passphrase): <Enter>
+Enter same passphrase again: <Enter>
+Your identification has been saved in /home/max/.ssh/id_rsa.
+Your public key has been saved in /home/max/.ssh/id_rsa.pub.
+The key fingerprint is:
+...
+The key's randomart image is:
+...
+> ssh-copy-id <user>@deneb1.epfl.ch
+> ssh <user>@deneb1.epfl.ch   # should now work without password
+\end{bashcommand}
+        \item configure your personal access to the \verb|deneb-molsim| computer
+\begin{bashcommand}
+> verdi computer configure deneb-molsim
+
+Configuring computer 'deneb-molsim' for the AiiDA user '<your_aiida_user>@epfl.ch'
+Computer deneb-molsim has transport of type ssh
+Note: to leave a field unconfigured, leave it empty and press [Enter]
+=> username = <your_epfl_username>
+=> port = 22
+=> look_for_keys = 
+=> key_filename = 
+=> timeout = 60
+=> allow_agent = 
+=> proxy_command = 
+=> compress = True
+=> gss_auth = no
+=> gss_kex = no
+=> gss_deleg_creds = no
+=> gss_host = deneb1.epfl.ch
+=> load_system_host_keys = True
+=> key_policy = AutoAddPolicy
+Configuration stored for your user on computer 'deneb-molsim'.
+\end{bashcommand}
+
+\item Finally, test your new computer
+\begin{bashcommand}
+> verdi computer test deneb-molsim
+\end{bashcommand}
+    \end{itemize}
+    
+    \item Compute the density, accessible volume and \href{https://en.wikipedia.org/wiki/Accessible_surface_area}{accessible
+    surface area} using zeo++.
+    
+    Use the \href{http://www.zeoplusplus.org/examples.html}{zeo++ web site} to figure out what the \verb|-ha|, \verb|-res|, \verb|-sa|, \verb|-volpo| command line options do.
+    
+    What is an appropriate value for the probe radius \verb|r|?
+    
+\begin{pythoncommand}
+code = Code.get_from_string("zeopp@deneb-molsim")
+calc = code.new_calc()
+
+# computational resources for calculation
+calc.set_withmpi(False)
+calc.set_resources({"num_machines": 1, "tot_num_mpiprocs": 1})
+calc.set_max_wallclock_seconds(30*60) # 30 minutes
+calc.set_max_memory_kb(2e6)
+
+# zeo++ command line parameters
+NetworkParameters = DataFactory('zeopp.parameters')
+d = {
+    'ha': True,
+    'res': True,
+    'sa': [<r (Angstrom)>, <r (Angstrom)>, 1000],
+    'volpo': [<r (Angstrom)>, <r (Angstrom)>, 1000],
+}
+parameters = NetworkParameters(dict=d)
+calc.use_parameters(parameters)
+
+# Load the cif node from the database, e.g. by PK
+# cif = load_node(<PK>)
+calc.use_structure(cif)
+
+# This places files in a subfolder "submit_test" instead of submitting.
+calc.submit_test()
+# Uncomment lines below when the script runs through
+# calc.store_all()
+# calc.submit()
+# print(calc)  # prints UUID and PK
+\end{pythoncommand}
+
+\end{itemize}
+
+\begin{tcolorbox}
+\textbf{Remember:} Use \verb|verdi run <script.py>| to run python scripts in the same
+environment as in the \verb|verdi shell|.
+\end{tcolorbox}
+
+
+\section{Compute methane loading for one MOF}
+The average loading of the MOF at a given pressure will be computed 
+using grand-canonical Monte Carlo (GCMC) simulations with the \href{https://github.com/numat/RASPA2}{RASPA} code.
+
+\begin{itemize}
+    \item The RASPA code needs several input parameters, some of which you will need to figure out
+\begin{pythoncommand}
+parameters = ParameterData(dict={
+    "GeneralSettings":
+    {
+    "SimulationType"                   : "MonteCarlo",
+    "NumberOfCycles"                   : 2000,
+    "NumberOfInitializationCycles"     : 2000,
+    "PrintEvery"                       : 2000,
+    "ChargeMethod"                     : "Ewald",
+    "CutOff"                           : 12.0,
+    "Forcefield"                       : "<string>",
+    "EwaldPrecision"                   : 1e-6,
+    "Framework"                        : 0,
+    "UnitCells"                        : "<int> <int> <int>",
+    "HeliumVoidFraction"               : 0.0,
+
+    "ExternalTemperature"              : <float (Kelvin)>,
+    "ExternalPressure"                 : <float (Pascal),
+    },
+    "Component":
+    [{
+    "MoleculeName"                     : "methane",
+    "MoleculeDefinition"               : "TraPPE",
+    "TranslationProbability"           : 0.5,
+    "ReinsertionProbability"           : 0.5,
+    "SwapProbability"                  : 1.0,
+    "CreateNumberOfMolecules"          : 0,
+    }],
+})
+\end{pythoncommand}
+    \begin{itemize}
+       % NOBODY cites the DOE /ARPA-E and I've wasted half an hour trying to find the exact specification...
+       % \item Which temperature does the US department of energy specify for the reporting of deliverable capacity?
+        \item Our simulations are performed under periodic boundary conditions.
+        This means, we need to make our simulation cell large enough that a molecule
+        will never interact with a two periodic copies of any of its neighbors.
+        Given the cutoff radius of $12$ Angstroms, how often do you need to replicate the unit cell
+        of the material?
+        
+        \emph{Hint:} The CIF files include information on the size of the unit cell.
+        \item To make things more interesting, we are going to use different force fields.
+        Ask your instructor to give you a force field identifier.
+    \end{itemize}
+    \item You already performed a small GCMC calculation at 10 bar during the tutorial. 
+    Adapt the input file to your needs and run the calculation.
+    \emph{Hint:} Once running, the calculation should finish within 5 minutes .
+\end{itemize}
+
+\section{Screening}
+
+For the screening part of the work, you can choose one of two possible routes:
+
+\begin{enumerate}
+    \item \textbf{Quick and simple:} Use \verb|for| loops in your scripts to loop over the structures in your database, 
+    submitting in total 1(Zeo++)+2(Raspa)=3 calculations per structure.
+    
+    This should require very little changes to your python scripts
+    and is a perfectly valid solution.
+    \item \textbf{Reusable and elegant:} Write an AiiDA \verb|Workchain| that takes a structure, performs all necessary calculations, and outputs the result.
+    
+    This route requires more advanced python concepts and
+    involves a bit of coding,
+    but makes your workflow more robust and reusable.
+\end{enumerate}
+
+
+%\begin{pythoncommand}
+%
+%import sys
+%import os
+%
+%from aiida import load_dbenv, is_dbenv_loaded
+%from aiida.backends import settings
+%if not is_dbenv_loaded():
+%    load_dbenv(profile=settings.AIIDADB_PROFILE)
+%
+%from aiida.common.example_helpers import test_and_get_code  
+%from aiida.orm.data.cif import CifData 
+%from aiida.orm.data.parameter import ParameterData 
+%from aiida.orm.data.singlefile import SinglefileData
+%
+%#calc object
+%code = test_and_get_code("raspa@aws", expected_code_type='raspa')
+%calc = code.new_calc()
+%
+%# parameters
+%parameters = ParameterData(dict={
+%    "GeneralSettings":
+%    {
+%    "SimulationType"                   : "MonteCarlo",
+%    "NumberOfCycles"                   : 2000,
+%    "NumberOfInitializationCycles"     : 2000,
+%    "PrintEvery"                       : 1000,
+%    "Forcefield"                       : "GenericMOFs",
+%    "Framework"                        : 0,
+%    "UnitCells"                        : "3 3 3",
+%    "HeliumVoidFraction"               : 0.29,
+%    "ExternalTemperature"              : 300.0,
+%    "ExternalPressure"                 : 1e6,
+%    },
+%    "Component":
+%    [{
+%    "MoleculeName"                     : "methane",
+%    "MoleculeDefinition"               : "TraPPE",
+%    "TranslationProbability"           : 0.5,
+%    "ReinsertionProbability"           : 0.5,
+%    "SwapProbability"                  : 1.0,
+%    "CreateNumberOfMolecules"          : 0,
+%    }],
+%    })
+%calc.use_parameters(parameters)
+%
+%# Additional files
+%pwd = os.path.dirname(os.path.realpath(__file__))
+%framework = CifData(file=pwd+'/LUFQUZ02.cif')
+%calc.use_structure(framework)
+%
+%# resources
+%calc.set_max_wallclock_seconds(30*60)  # 30 min
+%calc.set_resources({"num_machines": 1, "num_mpiprocs_per_machine":1})
+%
+%# store and submit
+%calc.store_all()
+%calc.submit()
+%
+%\end{pythoncommand}
+
+\subsection{Quick and simple}
+
+Just use the \verb|QueryBuilder| to load the \verb|CifData| 
+nodes from the AiiDA database and loop over them.
+
+Computed properties are automatically linked to \verb|CifData| nodes via calculation nodes.
+
+Try \verb|verdi graph generate <PK>| on a zeo++ or RASPA calculation node to get an overview of the AiiDA graph.
+
+In order to automatically determine how many unit cells to use in the simulation,
+you may use the following function for convenience:
+\begin{pythoncommand}
+def multiply_cell(cif, cutoff):
+    """ Determine number of replica of unit cell.
+    
+    Works for cells of arbitrary shape.
+    
+    :param cif:  CifData object
+    :param cutoff:  cutoff radius of interaction   
+    :returns:  String of integers specifying replica of unit cell, 
+               suitable for 'UnitCells' parameter of raspa calculation.
+    """
+    from math import cos, sin, sqrt, pi
+    import numpy as np
+    deg2rad=pi/180.
+
+    struct = cif.values.dictionary.itervalues().next()
+
+    a = float(struct['_cell_length_a'])
+    b = float(struct['_cell_length_b'])
+    c = float(struct['_cell_length_c'])
+
+    alpha = float(struct['_cell_angle_alpha'])*deg2rad
+    beta  = float(struct['_cell_angle_beta'])*deg2rad
+    gamma = float(struct['_cell_angle_gamma'])*deg2rad
+
+    # compute cell vectors following https://en.wikipedia.org/wiki/Fractional_coordinates
+    v = sqrt(1-cos(alpha)**2-cos(beta)**2-
+             cos(gamma)**2+2*cos(alpha)*cos(beta)*cos(gamma))
+    cell=np.zeros((3,3))
+    cell[0,:] = [a, 0, 0]
+    cell[1,:] = [b*cos(gamma), b*sin(gamma),0]
+    cell[2,:] = [c*cos(beta), c*(cos(alpha)-cos(beta)*cos(gamma))/(sin(gamma)),c*v
+               /sin(gamma)]
+    cell=np.array(cell)
+
+    # diagonalize the cell matrix
+    diag = np.diag(cell)
+    # and computing nx, ny and nz
+    nx, ny, nz = tuple(int(i) for i in np.ceil(cutoff/diag*2.))
+    
+    #return nx, ny, nz
+    return "{} {} {}".format(nx, ny, nz)
+\end{pythoncommand}
+
+
+\subsection{Elegant and robust}
+
+Combine the calculations into a workchain using the AiiDA \verb|WorkChain| class. Here one should define the list of input types using spec.input() function and the workflow steps using spec.outline() function. In our case the workflow takes as input CifData object with structure and the names of Zeo++ and Raspa codes. 
+\begin{pythoncommand}
+class DcMethane(WorkChain):
+    """
+    Workchain that for a given matherial will compute a deliverable capacity of methane
+    """
+
+    @classmethod
+    def define(cls, spec):
+        """
+        This is the most important method of a Workchain, that defines the
+        inputs that it takes, the logic of the execution and the outputs
+        that are generated in the process 
+        """
+        super(DcMethane, cls).define(spec)
+        
+        # First we define the inputs, specifying the type we expect
+        spec.input("structure", valid_type=CifData, required=True)
+        spec.input("zeopp_codename", valid_type=Str, required=True)
+        spec.input("raspa_codename", valid_type=Str, required=True)
+
+        
+        # The outline describes the business logic that defines
+        # which steps are executed in what order and based on
+        # what conditions. Each `cls.method` is implemented below
+        spec.outline(
+            cls.init,
+            cls.run_geom_zeopp,
+            cls.run_loading_raspa_5_8,
+            cls.parse_loading_raspa,
+            cls.run_loading_raspa_65,
+            cls.parse_loading_raspa,
+            cls.extract_results,
+        )
+        
+        # Here we define the output the Workchain will generate and
+        # return. Dynamic output allows a variety of AiiDA data nodes
+        # to be returned
+        spec.dynamic_output()
+\end{pythoncommand}
+
+The workchain consists of 7 steps. The step 1 is the preparation of the input parameters and of some useful variables. 
+\begin{pythoncommand}
+def init(self):
+    """
+    Initialize variables
+    """
+
+    # Define cutoff for the methane-methane interactions
+    cutoff = 12.00
+
+    self.ctx.loading_average = {}
+
+    self.ctx.parameters = {<adapt the parameters dictionary defined in the section 3>}
+    # Note: You'll need the multiply_cell function mentioned in section 4.1
+
+    self.ctx.options = {
+        "resources": {
+            "num_machines": 1,
+            "tot_num_mpiprocs": 1,
+            "num_mpiprocs_per_machine": 1,
+        },
+        "max_wallclock_seconds": 10 * 60 * 60, # 10 hours
+        "max_memory_kb": 2000000, # limiting memory per job
+        "withmpi": False,
+    }
+\end{pythoncommand}
+
+
+Step 2 of the Workchain computes the geometric parameters of the MOFs. You can already identify a lot of similarities between the way we submited Zeo++ calculation in the setion 2 and how we do it as a workflow step. The most noticeable difference here is that the calculation inputs such as Code, structure and etc are provided as a dictionary. 
+
+\begin{pythoncommand}
+def run_geom_zeopp(self):
+    """
+    This is the main function that will perform a raspa
+    calculation for the current pressure
+    """
+
+    NetworkParameters = DataFactory('zeopp.parameters')
+    # Create the input dictionary
+    sigma = 1.86
+    params = {
+        'ha': True,
+        'res': True,
+        'sa': [sigma, sigma, 100000],
+        'volpo': [sigma, sigma, 100000],
+    }
+
+    inputs = {
+        'code'       : Code.get_from_string(self.inputs.zeopp_codename.value),
+        'structure'  : self.inputs.structure,
+        'parameters' : NetworkParameters(dict=params),
+        '_options'   : self.ctx.options,
+    }
+
+    # Create the calculation process and launch it
+    process = ZeoppCalculation.process()
+    future  = submit(process, **inputs)
+    self.report("pk: {} | Running geometry analysis with zeo++".format(future.pid))
+
+    return ToContext(zeopp=Outputs(future))
+\end{pythoncommand}
+
+Steps 3 and 5 compute the methane loading in [molecules/cell] units at 5.8 and 65 bars respectively. As the same calculation is performed twice in this workchain, we put the common part of those functions in a separate one:
+
+\begin{pythoncommand}
+def _run_loading_raspa(self, pressure):
+    """
+    This is the main function that will perform a raspa
+    calculation for the current pressure
+    """
+    self.ctx.parameters['GeneralSettings']['ExternalPressure'] = pressure
+    # Create the input dictionary
+    inputs = {
+        'code'       : Code.get_from_string(self.inputs.raspa_codename.value),
+        'structure'  : self.inputs.structure,
+        'parameters' : ParameterData(dict=self.ctx.parameters),
+        '_options'   : self.ctx.options,
+    }
+
+    # Create the calculation process and launch it
+    process = RaspaCalculation.process()
+    future  = submit(process, **inputs)
+    self.report("pk: {} | Running raspa for the pressure {} [bar]".format(future.pid, pressure/1e5))
+
+    return ToContext(raspa=Outputs(future))
+\end{pythoncommand}
+
+While run\_loading\_raspa\_5\_8 and run\_loading\_raspa\_65 functions are defined as follows:
+
+\begin{pythoncommand}
+def run_loading_raspa_5_8(self):
+    return self._run_loading_raspa(pressure = 5.8e5)
+
+def run_loading_raspa_65(self):
+    return self._run_loading_raspa(pressure = 6.5e6)
+\end{pythoncommand}
+
+Steps 4 and 6 extract pressure and methane loading from the input and output parameters of the calculation and put them into context (ctx) that is used to store any data that should be persisted between step.
+
+\begin{pythoncommand}
+def parse_loading_raspa(self):
+    """
+    Extract the pressure and loading average of the last completed raspa calculation
+    """
+    pressure = self.ctx.parameters['GeneralSettings']['ExternalPressure']
+    loading_average = self.ctx.raspa["component_0"].dict.loading_absolute_average
+    self.ctx.loading_average[str(int(pressure))] = loading_average
+\end{pythoncommand}
+
+Last step stores the selected computed parameters as the output of the DcMethane workchain:
+\begin{pythoncommand}
+def extract_results(self):
+    """
+    Attach the results of the raspa calculation and the initial structure to the outputs
+    """
+    dc = self.ctx.loading_average['6500000'] - self.ctx.loading_average['580000']
+
+    zeopp = self.ctx.zeopp
+    res = {
+            'density'                       : zeopp['pore_volume_volpo'].get_attr('Density'),
+            'density_units'                 : 'g/cm^3',
+            'pore_accesible_volume'         : zeopp['pore_volume_volpo'].get_attr('POAV_A^3'),
+            'pore_accesible_volume_units'   : 'A^3',
+            'unitcell_volume'               : zeopp['pore_volume_volpo'].get_attr(
+                                              'Unitcell_volume'),
+            'unitcell_volume_units'         : 'A^3',
+            'largest_included_sphere'       : zeopp['free_sphere_res'].get_attr(
+                                              'Largest_included_sphere'),
+            'largest_included_sphere_units' : 'A',
+            'accessible_surface_area'       : zeopp['surface_area_sa'].get_attr('ASA_m^2/g'),
+            'accessible_surface_area_units' : 'm^2/g',
+            "deliverable_capacity"          : dc,
+            "deliverable_capacity_units"    : "molecules/unit cell",
+            }
+    self.out("result",  ParameterData(dict=res))
+
+    self.report("Workchain <{}> completed successfully".format(self.calc.pk))
+    return
+\end{pythoncommand}
+
+To submit the calculation please adapt the following script. Please note, the file containing the \verb|DcMethane| workchain should be accessible from the python shell. To achieve that just place the file into a folder listed in \verb|PYTHONPATH| system variable and rename it to  \verb|deliverable_capacity.py|.
+
+\begin{pythoncommand}
+import os
+from deliverable_capacity import DcMethane
+
+from aiida.orm.data.cif import CifData
+from aiida.orm.data.base import Str
+from aiida.work.run import run, submit
+
+for s in structures:
+    outputs = submit(
+        DcMethane,
+        structure=s,
+        zeopp_codename=Str('zeopp@deneb-molsim'),
+        raspa_codename=Str('raspa@deneb-molsim'),
+    )
+\end{pythoncommand}
+
+Where structures is the list of \verb|CifData| nodes stored in your AiiDA database. 
+
+\section{Ranking the structures}
+
+We've prepared an interactive jupyter app that helps you
+with ranking and visualizing the structures.
+Use at your convenience.
+
+To get the app please download it using the following link:
+\begin{bashcommand}
+> wget https://www.dropbox.com/s/hced3imzvqoij0g/molsim.tar.gz?dl=1 -O molsim.tar.gz
+> tar -xzf molsim.tar.gz
+\end{bashcommand}
+
+If you are working with Quantum Mobile, simply place the extracted folder inside \verb|/project/apps| and it should already work. 
+
+In case you have configured AiiDA on your own computer please install additional packages: 
+\begin{bashcommand}
+> pip install jupyter matplotlib bokeh plotly ase
+> tar -xzf molsim.tar.gz
+\end{bashcommand}
+We also recommend to have jupyter appmode installed.
+For more details and installation instructions please visit \href{https://github.com/oschuett/appmode}{this page}.
+
+To use the application please open \verb|dc_group.ipynb| (in case you were following the section 4.1 route) or \verb|dc_wf.ipynb| (in case you have chosen 4.2) and switch to the Appmode for the convenience. 
+For the users of Quantum Mobile it is enough to launch ``Jupyter Apps'' icon on the desktop and chose corresponding notebook from the ``Molsim course'' app.
+Once you have opened the notebook,  specify the group of structures (if required) and press the ``Plot'' button. 
+
+We recommend to use the ``bokeh'' framework as it shows the corresponding structure pk once you put the cursor on top of a point. 
+
+\section{Exporting your database}
+Let's put the nodes to be exported into a new group \verb|report|:
+\begin{pythoncommand}
+CifData=DataFactory('cif')
+qb=QueryBuilder()
+qb.append(Group, filters={'name':'mofs'}, tag='mofs')  # filter by 'mofs' group
+qb.append(CifData, member_of='mofs', tag='cifs')
+cifs = qb.all()  # get all CifData nodes in the group
+
+qb.append(Node, descendant_of='cifs')  # get all their children
+children = qb.all()
+
+report, created = Group.get_or_create(name='report')
+report.add_nodes([ n[0] for n in cifs + children ])
+\end{pythoncommand}
+
+Once you've grouped your nodes, check the contents of the group and export it:
+\begin{bashcommand}
+> verdi group show report
+> verdi export create -g report database.aiida
+\end{bashcommand}
+\emph{Note:} AiiDA automatically exports the direct outputs of calculations,
+i.e. we don't need to add them to our group explicitly.
+
+\end{document}
